@@ -1,0 +1,106 @@
+---
+title: "Prediction Assignment Accelerometer"
+author: "Earl Bingham"
+date: "August 22, 2016"
+output: html_document
+---
+
+## Synopsis
+
+The goal of this assignment was to quantify how well the users of personal activity devices are doing. The predictions used the Weight Lifting Exercise Dataset provided by the Pontifical Catholic University of Rio de Janeiro. The analysis started from the raw data file, a comma seperated value file. What follows is the code used for the analysis, and comments regarding the results and assumptions that can be made.
+
+## Weight Lifting Exercises Dataset
+
+The training dataset for this assignment: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test dataset for this assigment:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The test dataset contains 20 rows 
+Both datasets need to be in the local working directory for this R markdown document to recreate the results. The data for this project is kindly provided by:
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H.: Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13). Stuttgart, Germany: ACM SIGCHI, 2013 (http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201).
+
+The Weight Lifting Exercises dataset is used to investigate how well an activity is being performed. Six participants were performing one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions:
+
+Class A - Exactly according to the specification
+Class B - Throwing the elbows to the front
+Class C - Lifting the dumbbell only halfway
+Class D - Lowering the dumbbell only halfway
+Class E - Throwing the hips to the front
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+## Data Processing
+Load the data
+```{r, cache=TRUE}
+install.packages('caret', dependencies = TRUE, repos="http://cran.rstudio.com/")
+install.packages('e1071', dependencies=TRUE, repos="http://cran.rstudio.com/")
+
+options(digits = 7)
+library(caret);library(randomForest)
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+Group specific the features defined into 52 predictors in our 160 variable test and training datasets.
+```{r, cache=TRUE}
+predGroups <- c(grep("^accel", names(training)), grep("^gyros", names(training)), grep("^magnet", names(training)), grep("^roll", names(training)), grep("^pitch", names(training)), grep("^yaw", names(training)), grep("^total", names(training)))
+trainPredGrps <- training[, c(predGroups, 160)]
+testPredGrps <- testing[, c(predGroups, 160)]
+```
+
+Removes predictors that have one unique value across samples, and remove predictors that have both few unique values relative to the number of samples.
+```{r, cache=TRUE}
+nearZeroVar(trainPredGrps[, -53], saveMetric = TRUE)
+```
+
+The plot below shows that the final group ‘E’ had a number of varing results due to how the different test subjects would throw their hips. It represents a Report of how I built my model.
+```{r, cache=TRUE}
+qplot(x = trainPredGrps[, "accel_belt_x"], y = trainPredGrps[, "accel_arm_x"], 
+      color = trainPredGrps$classe)
+```
+
+## Training Dataset and Cross-Validation
+
+In order to evaluate our prediction algorithm cross-validation is used. The training set is split into a cross-validation training set cvTrain and test set cvTest. So we can train our model on the cvTrain dataset and test the accuracy of our prediction on the cvTest dataset in order to evaluate the influence of different training methods, predictor selections and predictor preprocessing methods.
+```{r, cache=TRUE}
+set.seed(125)
+inTrain <- createDataPartition(y = trainPredGrps$classe, p = 0.75, list = FALSE)
+cvTrain <- trainPredGrps[inTrain, ]
+cvTest <- trainPredGrps[-inTrain, ]
+
+fitCtrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+```
+
+The choice to use this training set was to ensure a good comparison could be made between the sample data and what is found with tree model.
+```{r, cache=TRUE}
+set.seed(125)
+modFit <- train(classe ~ ., data = cvTrain, method = "qda", preProcess = c("center", "scale"), trControl = fitCtrl)
+
+ptrain <- predict(modFit, newdata = cvTrain)
+equalPredTrain <- (ptrain == cvTrain$classe)
+print(sum(equalPredTrain)/length(equalPredTrain))
+
+confusionMatrix(data = ptrain, reference = cvTrain$classe)
+```
+
+The cross validation test set (cvTest) shows accuracy and estimates the out-of-sample error rate of the prediction model, giving 89%.
+```{r, cache=TRUE}
+ptest <- predict(modFit, newdata = cvTest)
+equalPredTest <- (ptest == cvTest$classe)
+print(sum(equalPredTest)/length(equalPredTest))
+
+confusionMatrix(data = ptest, reference = cvTest$classe)
+```
+
+Here I then used the Random Forest Model for prediction comparison. This model achieves high accuracy when predicted against the cross validation.
+```{r, cache=TRUE}
+trainFit <-randomForest(classe ~., data = cvTrain, importance = TRUE)
+print(trainFit)
+```
+
+What follows is the prediction model to predict 20 different test cases from the 160 variables.
+```{r, cache=TRUE}
+testPrediction <- predict(modFit, newdata = testing)
+print(rbind(testing[1:20, 160], as.character(testPrediction)))
+```
